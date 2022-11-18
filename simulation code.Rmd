@@ -1,0 +1,334 @@
+---
+title: "Simulation"
+author: "zww"
+date: "12/9/2021"
+output: html_document
+---
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+library(skimr)
+library(dplyr)
+library(data.table)
+library(DT)
+library(pwr)
+library(pwr2)
+```
+
+
+```{r}
+pwr.2way(a=2, b=2, alpha=0.05, size.A=100, size.B=100, f.A=0.16, f.B=0.2)
+
+pwr.anova.test(k = 2, n = 200, f = 5310, sig.level = 0.05, power = NULL)
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+## Data preparation for an Expected Effect
+B <- 1000
+n <- 400
+RNGversion(3.6)
+Experiment <- 1:B
+
+set.seed(5300)
+Group = c(rep.int(x="Group1",time =n/4),
+          rep.int(x="Group2", times = n/4),
+          rep.int(x="Group3", times = n/4),
+          rep.int(x="Group4", times = n/4))
+
+sim.dat <- as.data.table(expand.grid(Experiment= Experiment, Group = Group))
+sim.dat$incentives <- case_when(sim.dat$Group == 'Group1' ~ 'Yes',
+                            sim.dat$Group == 'Group2' ~ 'No',
+                            sim.dat$Group == 'Group3' ~ 'Yes',
+                            sim.dat$Group == 'Group4' ~ 'No')
+
+sim.dat$communication <- case_when(sim.dat$Group == 'Group1' ~ 'Email',
+                            sim.dat$Group == 'Group2' ~ 'Email',
+                            sim.dat$Group == 'Group3' ~ 'Text',
+                            sim.dat$Group == 'Group4' ~ 'Text')
+
+setorderv(x = sim.dat, cols = c("Experiment", "Group"), order =c(1,1))
+```
+
+
+```{r}
+sim.dat[Group=="Group1" , BR:= rnorm(n=.N,mean= 0.45 , sd=0.1)]
+sim.dat[Group=="Group2" , BR:= rnorm(n=.N,mean= 0.4 , sd=0.1)]
+sim.dat[Group=="Group3" , BR:= rnorm(n=.N,mean= 0.8 , sd=0.2)]
+sim.dat[Group=="Group4" , BR:= rnorm(n=.N,mean= 0.7 , sd=0.2)]
+
+sim.dat$BR <- ifelse(sim.dat$BR>0.5, '1','0')
+sim.dat$BR<- as.numeric(sim.dat$BR)
+```
+
+
+```{r}
+sim.dat[Group=="Group1" , RT:= round(rnorm(n=.N,mean= 5400 , sd=1800),digits = 1)]
+sim.dat[Group=="Group2" , RT:= round(rnorm(n=.N,mean= 5400 , sd=1800),digits = 1)]
+sim.dat[Group=="Group3" , RT:= round(rnorm(n=.N,mean= 90 , sd=10),digits = 1)]
+sim.dat[Group=="Group4" , RT:= round(rnorm(n=.N,mean= 90 , sd=10),digits = 1)]
+
+```
+
+
+
+
+
+  
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+### Function for conducting Anova test for Booster Rate
+analyze.experiment1<- function(the.dat){
+  require(data.table)
+  setDT(the.dat)
+  
+  the.test<- aov(BR~incentives+communication, data= the.dat)
+  
+  options(digits = 3)
+  the.anov<- TukeyHSD(the.test, ordered = FALSE, conf.level = 0.95)
+
+  the.effect1 <- unlist(the.anov)[1]
+  the.effect2 <- unlist(the.anov)[5]
+  
+  ci1 <- unlist(the.anov)[3]
+  ci1_2 <- unlist(the.anov)[2]
+  
+  ci2 <- unlist(the.anov)[7]
+  ci2_2 <- unlist(the.anov)[6]
+
+  p1 <- unlist(summary(the.test))["Pr(>F)1"]
+  p2 <- unlist(summary(the.test))["Pr(>F)2"]
+  
+  
+  result <- data.table(incentive_effects = the.effect1, communication_effects = the.effect2,
+                       lr.ci_incentive = ci1_2, upr.ci_incentive = ci1, lr.ci_comm = ci2_2, upr.ci_comm = ci2,
+                       p_incentive = p1, p_communication = p2)
+  
+  return(result)
+}
+
+
+### Function for conducting Anova test for Response Time
+analyze.experiment2<- function(the.dat){
+  require(data.table)
+  setDT(the.dat)
+  
+  the.test<- aov(RT~incentives+communication, data= the.dat)
+  
+  options(digits = 3)
+  the.anov<- TukeyHSD(the.test, ordered = FALSE, conf.level = 0.95)
+
+  the.effect1 <- unlist(the.anov)[1]
+  the.effect2 <- unlist(the.anov)[5]
+  
+  ci1 <- unlist(the.anov)[3]
+  ci1_2 <- unlist(the.anov)[2]
+  
+  ci2 <- unlist(the.anov)[7]
+  ci2_2 <- unlist(the.anov)[6]
+  
+  p1 <- unlist(summary(the.test))["Pr(>F)1"]
+  p2 <- unlist(summary(the.test))["Pr(>F)2"]
+  
+  result <- data.table(incentive_effects = the.effect1, communication_effects = the.effect2,
+                        lr.ci_incentive = ci1_2, upr.ci_incentive = ci1, lr.ci_comm = ci2_2, upr.ci_comm = ci2,
+                        p_incentive = p1, p_communication = p2)
+  
+
+  return(result)
+  
+}
+
+```
+
+
+
+```{r, include=FALSE, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+### Conduct the test on simulated data (Booster Rate)
+exp.results1 <- sim.dat[,analyze.experiment1(the.dat = .SD),
+                       keyby= "Experiment"]
+exp.results1[,2:5] = round(exp.results1[,2:5], 3)
+
+
+### Identify true and false experiments
+exp.results1$p_inc_sig = case_when(exp.results1$p_incentive < 0.05 ~ 'TRUE',
+                                  exp.results1$p_incentive >= 0.05 ~ 'FALSE')
+
+exp.results1$p_comm_sig = case_when(exp.results1$p_communication < 0.05 ~ 'TRUE',
+                                  exp.results1$p_communication >= 0.05 ~ 'FALSE')
+
+# false negative = number of false prediction / total observations
+exp.results1$false_neg_inc = 100*(1000 - sum(as.logical(exp.results1$p_inc_sig)))/1000
+exp.results1$false_neg_com = 100*(1000-sum(as.logical(exp.results1$p_comm_sig)))/1000
+
+# true positives = 1000 - false neg
+exp.results1$true_pos_inc = 100 - exp.results1$false_neg_inc
+exp.results1$true_pos_com = 100 - exp.results1$false_neg_com
+```
+
+
+```{r}
+BR_inc1 = DT::datatable(data = exp.results1[1:100,c('Experiment', 'lr.ci_incentive', 'upr.ci_incentive', 'incentive_effects', 'p_incentive', 'p_inc_sig', 'false_neg_inc', 'true_pos_inc')], rownames = F); BR_inc1
+```
+
+
+```{r}
+BR_comm1 = DT::datatable(data = exp.results1[1:100,c('Experiment', 'lr.ci_comm', 'upr.ci_comm', 'communication_effects', 'p_communication', 'p_comm_sig', 'false_neg_com', 'true_pos_com')], rownames = F); BR_comm1
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+### Conduct the test on simulated data (Response Time)
+exp.results2 <- sim.dat[,analyze.experiment2(the.dat = .SD),
+                        keyby= "Experiment"]
+exp.results2[,2:5] = round(exp.results2[,2:5], 3)
+
+
+### Identify true and false experiments
+exp.results2$p_inc_sig = case_when(exp.results2$p_incentive < 0.05 ~ 'TRUE',
+                                  exp.results2$p_incentive >= 0.05 ~ 'FALSE')
+
+exp.results2$p_comm_sig = case_when(exp.results2$p_communication < 0.05 ~ 'TRUE',
+                                   exp.results2$p_communication >= 0.05 ~ 'FALSE')
+
+# false negative = number of false prediction / total observations
+exp.results2$false_neg_inc = 100*(1000-sum(as.logical(exp.results2$p_inc_sig)))/1000
+exp.results2$false_neg_com = 100*(1000-sum(as.logical(exp.results2$p_comm_sig)))/1000
+
+
+# true positives = 1000 - false neg
+exp.results2$true_pos_inc = 100 - exp.results2$false_neg_inc
+exp.results2$true_pos_com = 100 - exp.results2$false_neg_com
+```
+
+
+```{r}
+RT_inc1 = DT::datatable(data = exp.results2[1:100,c('Experiment', 'lr.ci_incentive', 'upr.ci_incentive', 'incentive_effects', 'p_incentive', 'p_inc_sig', 'false_neg_inc', 'true_pos_inc')], rownames = F); RT_inc1
+```
+
+
+```{r}
+RT_comm1 = DT::datatable(data = exp.results2[1:100,c('Experiment', 'lr.ci_comm', 'upr.ci_comm', 'communication_effects', 'p_communication', 'p_comm_sig', 'false_neg_com', 'true_pos_com')], rownames = F); RT_comm1
+
+```
+
+########################################################
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+## Data preparation for an No Effect
+B <- 1000
+n <- 400
+RNGversion(3.6)
+Experiment <- 1:B
+
+library(data.table)
+library(DT)
+
+
+set.seed(5300)
+Group = c(rep.int(x="Group1",time =n/4),
+          rep.int(x="Group2", times = n/4),
+          rep.int(x="Group3", times = n/4),
+          rep.int(x="Group4", times = n/4))
+sim.dat2 <- as.data.table(expand.grid(Experiment= Experiment, Group = Group))
+sim.dat2$incentives <- case_when(sim.dat2$Group == 'Group1' ~ 'Yes',
+                            sim.dat2$Group == 'Group2' ~ 'No',
+                            sim.dat2$Group == 'Group3' ~ 'Yes',
+                            sim.dat2$Group == 'Group4' ~ 'No')
+
+sim.dat2$communication <- case_when(sim.dat2$Group == 'Group1' ~ 'Email',
+                            sim.dat2$Group == 'Group2' ~ 'Email',
+                            sim.dat2$Group == 'Group3' ~ 'Text',
+                            sim.dat2$Group == 'Group4' ~ 'Text')
+```
+
+
+```{r}
+setorderv(x = sim.dat2, cols = c("Experiment", "Group"), order =c(1,1))
+sim.dat2[Group=="Group1" , BR:= rnorm(n=.N,mean= 0.45 , sd=0.2)]
+sim.dat2[Group=="Group2" , BR:= rnorm(n=.N,mean= 0.43 , sd=0.2)]
+sim.dat2[Group=="Group3" , BR:= rnorm(n=.N,mean= 0.44 , sd=0.2)]
+sim.dat2[Group=="Group4" , BR:= rnorm(n=.N,mean= 0.42 , sd=0.2)]
+
+
+sim.dat2$BR <- ifelse(sim.dat2$BR>0.5, '1','0')
+sim.dat2$BR<- as.numeric(sim.dat2$BR)
+```
+
+
+```{r}
+sim.dat2[Group=="Group1" , RT:= round(rnorm(n=.N,mean= 5400 , sd=1800),digits = 1)]
+sim.dat2[Group=="Group2" , RT:= round(rnorm(n=.N,mean= 5400 , sd=1800),digits = 1)]
+sim.dat2[Group=="Group3" , RT:= round(rnorm(n=.N,mean= 5300 , sd=1800),digits = 1)]
+sim.dat2[Group=="Group4" , RT:= round(rnorm(n=.N,mean= 5300 , sd=1800),digits = 1)]
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+### Conduct the test on simulated data (Booster Rate)
+exp.results1 <- sim.dat2[,analyze.experiment1(the.dat = .SD),
+                       keyby= "Experiment"]
+exp.results1[,2:5] = round(exp.results1[,2:5], 3)
+
+### Identify true and false experiments
+exp.results1$p_inc_sig = case_when(exp.results1$p_incentive < 0.05 ~ 'TRUE',
+                                  exp.results1$p_incentive >= 0.05 ~ 'FALSE')
+
+exp.results1$p_comm_sig = case_when(exp.results1$p_communication < 0.05 ~ 'TRUE',
+                                  exp.results1$p_communication >= 0.05 ~ 'FALSE')
+
+# false positive = number of true prediction / total observations
+exp.results1$false_pos_inc = 100*(sum(as.logical(exp.results1$p_inc_sig)))/1000
+exp.results1$false_pos_com = 100*(sum(as.logical(exp.results1$p_comm_sig)))/1000
+
+# true negatives = 1000 - false pos
+exp.results1$true_neg_inc = 100 - exp.results1$false_pos_inc
+exp.results1$true_neg_com = 100 - exp.results1$false_pos_com
+```
+
+
+```{r}
+BR_inc2 = DT::datatable(data = exp.results1[1:100,c('Experiment', 'lr.ci_incentive', 'upr.ci_incentive', 'incentive_effects', 'p_incentive', 'p_inc_sig', 'false_pos_inc', 'true_neg_inc')], rownames = F); BR_inc2
+```
+
+
+```{r}
+BR_comm2 = DT::datatable(data = exp.results1[1:100,c('Experiment', 'lr.ci_comm', 'upr.ci_comm', 'communication_effects', 'p_communication', 'p_comm_sig', 'false_pos_com', 'true_neg_com')], rownames = F); BR_comm2
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo = FALSE}
+### Conduct the test on simulated data (Response Time)
+exp.results2 <- sim.dat2[,analyze.experiment2(the.dat = .SD),
+                        keyby= "Experiment"]
+exp.results2[,2:5] = round(exp.results2[,2:5], 3)
+
+
+### Identify true and false experiments
+exp.results2$p_inc_sig = case_when(exp.results2$p_incentive < 0.05 ~ 'TRUE',
+                                  exp.results2$p_incentive >= 0.05 ~ 'FALSE')
+
+exp.results2$p_comm_sig = case_when(exp.results2$p_communication < 0.05 ~ 'TRUE',
+                                   exp.results2$p_communication >= 0.05 ~ 'FALSE')
+
+# false positive = number of true prediction / total observations
+exp.results2$false_pos_inc = 100*(sum(as.logical(exp.results2$p_inc_sig)))/1000
+exp.results2$false_pos_com = 100*(sum(as.logical(exp.results2$p_comm_sig)))/1000
+
+# true negatives = 1000 - false pos
+exp.results2$true_neg_inc = 100 - exp.results2$false_pos_inc
+exp.results2$true_neg_com = 100 - exp.results2$false_pos_com
+```
+
+
+```{r}
+RT_inc2 = DT::datatable(data = exp.results2[1:100,c('Experiment', 'lr.ci_incentive', 'upr.ci_incentive', 'incentive_effects', 'p_incentive', 'p_inc_sig', 'false_pos_inc', 'true_neg_inc')], rownames = F); RT_inc2
+```
+
+
+```{r}
+RT_comm2 = DT::datatable(data = exp.results2[1:100,c('Experiment', 'lr.ci_comm', 'upr.ci_comm', 'communication_effects', 'p_communication', 'p_comm_sig', 'false_pos_com', 'true_neg_com')], rownames = F); RT_comm2
+```
+
+
+
